@@ -10,7 +10,9 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove
+    ReplyKeyboardRemove,
+    KeyboardButton,
+    WebAppInfo
 )
 from telegram.ext import (
     Application,
@@ -35,10 +37,14 @@ logger = logging.getLogger(__name__)
 # Retrieve token from environment variable
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
+# Retrieve Mini App URL from environment or fallback
+MINI_APP_URL = os.environ.get("TELEGRAM_MINI_APP_URL", "https://ayanadamtew.github.io/Exit_Exam_bot/mini_app/")
+
 def get_main_menu_keyboard():
     """Returns the persistent main menu reply keyboard."""
     keyboard = [
         ["🚀 Start New Quiz", "📊 My Stats"],
+        [KeyboardButton("📱 Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL))],
         ["ℹ️ Help"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -224,27 +230,27 @@ async def send_current_question(update: Update, context: ContextTypes.DEFAULT_TY
     q_opt_c = html.escape(str(q['option_c']))
     q_opt_d = html.escape(str(q['option_d']))
 
-    # Format message text beautifully
+    # Format message text beautifully with standard letters
     text = (
         f"📖 <b>Question {idx + 1} of {len(questions)}</b>\n"
         f"────────────────────────\n"
         f"🔹 <b>{q_question}</b>\n\n"
-        f"🅰️ {q_opt_a}\n"
-        f"🅱️ {q_opt_b}\n"
-        f"🅲 {q_opt_c}\n"
-        f"🅳 {q_opt_d}\n"
+        f"<b>A:</b> {q_opt_a}\n"
+        f"<b>B:</b> {q_opt_b}\n"
+        f"<b>C:</b> {q_opt_c}\n"
+        f"<b>D:</b> {q_opt_d}\n"
         f"────────────────────────"
     )
 
     # Inline options keyboard
     keyboard = [
         [
-            InlineKeyboardButton("🅰️ A", callback_data="quiz_ans_A"),
-            InlineKeyboardButton("🅱️ B", callback_data="quiz_ans_B"),
+            InlineKeyboardButton("A", callback_data="quiz_ans_A"),
+            InlineKeyboardButton("B", callback_data="quiz_ans_B"),
         ],
         [
-            InlineKeyboardButton("🅲 C", callback_data="quiz_ans_C"),
-            InlineKeyboardButton("🅳 D", callback_data="quiz_ans_D"),
+            InlineKeyboardButton("C", callback_data="quiz_ans_C"),
+            InlineKeyboardButton("D", callback_data="quiz_ans_D"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -310,10 +316,10 @@ async def handle_answer_callback(update: Update, context: ContextTypes.DEFAULT_T
         f"📖 <b>Question {idx + 1} of {len(questions)}</b>\n"
         f"────────────────────────\n"
         f"🔹 <b>{q_question}</b>\n\n"
-        f"🅰️ {q_opt_a}\n"
-        f"🅱️ {q_opt_b}\n"
-        f"🅲 {q_opt_c}\n"
-        f"🅳 {q_opt_d}\n"
+        f"<b>A:</b> {q_opt_a}\n"
+        f"<b>B:</b> {q_opt_b}\n"
+        f"<b>C:</b> {q_opt_c}\n"
+        f"<b>D:</b> {q_opt_d}\n"
         f"────────────────────────\n"
         f"{feedback_emoji} <b>Your Answer:</b> {user_choice} ({user_opt_text_esc})\n"
         f"{status_text}\n"
@@ -392,6 +398,34 @@ async def finish_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, user_i
             reply_markup=get_main_menu_keyboard()
         )
 
+async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processes questions JSON sent from the Telegram Mini App."""
+    user = update.effective_user
+    db.save_user(user.id, user.username, user.first_name)
+    
+    try:
+        data_str = update.effective_message.web_app_data.data
+        questions_list = json.loads(data_str)
+        
+        if not questions_list or not isinstance(questions_list, list):
+            await update.message.reply_text("❌ Received invalid questions database from Mini App.")
+            return
+            
+        # Save to database and start quiz session
+        db.start_quiz(user.id, questions_list)
+        
+        await update.message.reply_text(
+            f"✅ <b>Quiz loaded from Mini App!</b>\n"
+            f"Found <b>{len(questions_list)}</b> questions. Let's begin!",
+            parse_mode="HTML"
+        )
+        await send_current_question(update, context, user.id)
+        
+    except Exception as e:
+        logger.error(f"Error handling WebApp data: {e}", exc_info=True)
+        err_esc = html.escape(str(e))
+        await update.message.reply_text(f"❌ <b>Error parsing WebApp questions:</b> {err_esc}", parse_mode="HTML")
+
 async def handle_text_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Dispatches reply keyboard clicks to their respective commands."""
     text = update.message.text
@@ -433,6 +467,9 @@ def main():
 
     # CSV Uploads
     app.add_handler(MessageHandler(filters.Document.ALL, handle_csv))
+    
+    # WebApp data submission
+    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
 
     # Keyboard click routing
     app.add_handler(CallbackQueryHandler(handle_answer_callback, pattern="^quiz_ans_"))

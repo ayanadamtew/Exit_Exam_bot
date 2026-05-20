@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Quiz Mini App</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Style -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <!-- Background Animated Gradients -->
+    <div class="bg-gradient bg-1"></div>
+    <div class="bg-gradient bg-2"></div>
+    <div class="bg-gradient bg-3"></div>
+
+    <div class="app-container">
+        <!-- Main Header -->
+        <header class="app-header">
+            <div class="user-profile">
+                <div class="avatar-container">
+                    <img id="user-avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=Quiz" alt="Avatar">
+                </div>
+                <div class="user-meta">
+                    <span class="welcome-text">Welcome back,</span>
+                    <h3 id="user-name">Quiz Master</h3>
+                </div>
+            </div>
+            <div class="app-logo">
+                <i class="fa-solid fa-graduation-cap"></i>
+            </div>
+        </header>
+
+        <!-- Dynamic Main Content Grid -->
+        <main class="main-content">
+            <!-- Screen 1: Dashboard -->
+            <section id="screen-dashboard" class="screen active">
+                <!-- Statistics Dashboard Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon purple">
+                            <i class="fa-solid fa-gamepad"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-label">Total Quizzes</span>
+                            <h2 id="stat-total">12</h2>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon emerald">
+                            <i class="fa-solid fa-star-half-stroke"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-label">Avg. Accuracy</span>
+                            <h2 id="stat-accuracy">85%</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CSV Upload Drag-and-Drop Area -->
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-content">
+                        <div class="upload-icon-container">
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                        </div>
+                        <h3>Upload CSV Database</h3>
+                        <p>Drag & drop or click to upload your questions file</p>
+                        <span class="file-format-badge">.csv files only</span>
+                        <input type="file" id="csv-input" accept=".csv" style="display: none;">
+                    </div>
+                </div>
+
+                <!-- Demo Play Area -->
+                <div class="quick-start-card">
+                    <div class="quick-start-meta">
+                        <h4>🚀 Quick Training Session</h4>
+                        <p>Play our built-in sample test questions right now!</p>
+                    </div>
+                    <button class="btn btn-primary" id="btn-quick-play">
+                        <i class="fa-solid fa-bolt"></i> Start Practice Quiz
+                    </button>
+                </div>
+            </section>
+
+            <!-- Screen 2: Interactive Quiz Board -->
+            <section id="screen-quiz" class="screen">
+                <!-- Quiz Status Header -->
+                <div class="quiz-progress-header">
+                    <span id="quiz-question-counter">Question 1 of 5</span>
+                    <div class="progress-bar-outer">
+                        <div class="progress-bar-inner" id="quiz-progress-indicator" style="width: 20%;"></div>
+                    </div>
+                </div>
+
+                <!-- Active Question Card -->
+                <div class="question-container">
+                    <h2 class="question-title" id="display-question">What is the capital of France?</h2>
+                </div>
+
+                <!-- Multiple Choice Options -->
+                <div class="options-container" id="display-options">
+                    <!-- Dynamic Option Cards generated in JS -->
+                    <button class="option-card" data-option="A">
+                        <span class="option-letter">A</span>
+                        <span class="option-text">Paris</span>
+                    </button>
+                    <button class="option-card" data-option="B">
+                        <span class="option-letter">B</span>
+                        <span class="option-text">London</span>
+                    </button>
+                    <button class="option-card" data-option="C">
+                        <span class="option-letter">C</span>
+                        <span class="option-text">Berlin</span>
+                    </button>
+                    <button class="option-card" data-option="D">
+                        <span class="option-letter">D</span>
+                        <span class="option-text">Rome</span>
+                    </button>
+                </div>
+
+                <!-- Navigation Action Buttons -->
+                <div class="quiz-actions">
+                    <button class="btn btn-danger" id="btn-quit-quiz">
+                        <i class="fa-solid fa-xmark"></i> Abort Quiz
+                    </button>
+                    <button class="btn btn-success" id="btn-next-question" disabled>
+                        Next Question <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Screen 3: Performance Scoreboard -->
+            <section id="screen-results" class="screen">
+                <div class="results-container">
+                    <div class="trophy-animation">
+                        <i class="fa-solid fa-trophy"></i>
+                    </div>
+                    <h2>Session Completed!</h2>
+                    <p class="congrats-sub">Here is your interactive performance rating:</p>
+
+                    <!-- Scorecard Metrics -->
+                    <div class="score-circle-outer">
+                        <div class="score-circle-inner">
+                            <span id="result-score-fraction">4 / 5</span>
+                            <span id="result-score-percent">80% Accuracy</span>
+                        </div>
+                    </div>
+
+                    <!-- Progress rating details -->
+                    <div class="performance-details-card">
+                        <div class="perf-row">
+                            <span>Correct Answers:</span>
+                            <strong id="perf-correct" class="text-success">4</strong>
+                        </div>
+                        <div class="perf-row">
+                            <span>Incorrect Answers:</span>
+                            <strong id="perf-incorrect" class="text-danger">1</strong>
+                        </div>
+                        <div class="perf-row">
+                            <span>Evaluation Score:</span>
+                            <strong id="perf-rating" class="text-primary">Excellent job!</strong>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <button class="btn btn-primary btn-full" id="btn-return-home">
+                        <i class="fa-solid fa-house"></i> Return to Dashboard
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Custom Script -->
+    <script src="app.js"></script>
+</body>
+</html>
