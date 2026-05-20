@@ -4,6 +4,8 @@ import io
 import os
 import json
 import html
+import asyncio
+from aiohttp import web
 from dotenv import load_dotenv
 from telegram import (
     Update,
@@ -443,43 +445,59 @@ async def handle_text_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_menu_keyboard()
         )
 
+# ── Health-check Web Server (required by Render) ───────────────────────────
+async def health_handler(request):
+    return web.Response(text="OK")
+
+async def run_health_server():
+    app_web = web.Application()
+    app_web.router.add_get("/", health_handler)
+    app_web.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app_web)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health-check server running on port {port}")
+    # Keep running forever
+    while True:
+        await asyncio.sleep(3600)
+
+# ── Entry Point ─────────────────────────────────────────────────────────────
 def main():
-    # Setup database
     db.init_db()
 
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("\n❌ Error: TELEGRAM_BOT_TOKEN environment variable is not set!")
+        print("\n\u274c Error: TELEGRAM_BOT_TOKEN environment variable is not set!")
         print("=============================================================")
-        print("To run the Telegram Quiz Bot, you need a Bot Token:")
-        print("1. Message @BotFather on Telegram to create a new bot.")
-        print("2. Copy the HTTP API token.")
-        print("3. Create a file named '.env' in this directory with content:")
-        print("   TELEGRAM_BOT_TOKEN=your_token_here")
+        print("Create a .env file with: TELEGRAM_BOT_TOKEN=your_token_here")
         print("=============================================================\n")
         return
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    async def run_all():
+        tg_app = Application.builder().token(BOT_TOKEN).build()
 
-    # Commands
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("stats", stats_command))
+        # Handlers
+        tg_app.add_handler(CommandHandler("start", start))
+        tg_app.add_handler(CommandHandler("help", help_command))
+        tg_app.add_handler(CommandHandler("stats", stats_command))
+        tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_csv))
+        tg_app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
+        tg_app.add_handler(CallbackQueryHandler(handle_answer_callback, pattern="^quiz_ans_"))
+        tg_app.add_handler(CallbackQueryHandler(handle_next_callback, pattern="^quiz_next$"))
+        tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_menu))
 
-    # CSV Uploads
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_csv))
-    
-    # WebApp data submission
-    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
+        print("Bot starting up...")
 
-    # Keyboard click routing
-    app.add_handler(CallbackQueryHandler(handle_answer_callback, pattern="^quiz_ans_"))
-    app.add_handler(CallbackQueryHandler(handle_next_callback, pattern="^quiz_next$"))
+        # Run health-check server and Telegram bot concurrently
+        async with tg_app:
+            await tg_app.start()
+            await asyncio.gather(
+                run_health_server(),
+                tg_app.updater.start_polling(),
+            )
 
-    # Persistent reply menu options routing
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_menu))
-
-    print("Bot starting up...")
-    app.run_polling()
+    asyncio.run(run_all())
 
 if __name__ == "__main__":
     main()

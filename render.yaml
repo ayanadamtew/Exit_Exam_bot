@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: exit-exam-quiz-bot
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python quiz_bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false          # You will enter this manually in Render dashboard
+      - key: TELEGRAM_MINI_APP_URL
+        sync: false          # Set to your GitHub Pages URL after publishing mini_app/
+    autoDeploy: true
