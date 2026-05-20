@@ -45,8 +45,8 @@ MINI_APP_URL = os.environ.get("TELEGRAM_MINI_APP_URL", "https://ayanadamtew.gith
 def get_main_menu_keyboard():
     """Returns the persistent main menu reply keyboard."""
     keyboard = [
-        ["🚀 Start New Quiz", "📊 My Stats"],
-        [KeyboardButton("📱 Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL))],
+        ["🚀 Start New Quiz", "📂 My Quizzes"],
+        ["📊 My Stats", KeyboardButton("📱 Open Mini App", web_app=WebAppInfo(url=MINI_APP_URL))],
         ["ℹ️ Help"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -128,13 +128,33 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_quiz_instructions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Prompt directions to start a new quiz."""
-    await update.message.reply_text(
-        "🚀 <b>Ready to start a new quiz?</b>\n\n"
-        "Simply drag and drop or upload your questions CSV file here!\n\n"
-        "If you don't have one ready, download or inspect <b>sample_quiz.csv</b> in the workspace for reference.",
-        parse_mode="HTML",
-        reply_markup=get_main_menu_keyboard()
-    )
+    user = update.effective_user
+    saved = db.get_saved_quizzes(user.id)
+
+    if saved:
+        # Show saved quizzes as a quick-start inline list
+        buttons = [
+            [InlineKeyboardButton(f"📄 {q['quiz_name']}  ({q['question_count']} Qs)",
+                                  callback_data=f"sel_quiz_{q['id']}")]
+            for q in saved
+        ]
+        buttons.append([InlineKeyboardButton("📂 Browse My Saved Quizzes", callback_data="quiz_library")])
+        reply_markup = InlineKeyboardMarkup(buttons)
+        await update.message.reply_text(
+            "🚀 <b>Start a Quiz</b>\n"
+            "────────────────────────\n"
+            "Select one of your saved quizzes below, or upload a new CSV file.",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            "🚀 <b>Ready to start a new quiz?</b>\n\n"
+            "Simply drag and drop or upload your questions CSV file here!\n\n"
+            "If you don't have one ready, check <b>sample_quiz.csv</b> for reference.",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 async def handle_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Processes incoming CSV files and starts a quiz session."""
@@ -192,16 +212,21 @@ async def handle_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "answer": str(row["answer"])
             })
 
-        # Save to database
+        # Save the quiz file for future re-use (using filename without extension as name)
+        quiz_name = doc.file_name.rsplit(".", 1)[0]  # strip .csv
+        db.save_quiz_file(user.id, quiz_name, questions_list)
+
+        # Start active quiz session
         db.start_quiz(user.id, questions_list)
-        
+
         await status_msg.delete()
         await update.message.reply_text(
             f"✅ <b>Quiz loaded successfully!</b>\n"
-            f"Found <b>{len(questions_list)}</b> valid questions. Let's begin!",
+            f"Found <b>{len(questions_list)}</b> valid questions.\n"
+            f"💾 Saved as <b>\"{quiz_name}\"</b> — you can replay it anytime from 📂 My Quizzes.",
             parse_mode="HTML"
         )
-        
+
         await send_current_question(update, context, user.id)
 
     except Exception as e:
@@ -339,9 +364,120 @@ async def handle_next_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     """Advances the quiz session to the next question."""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = query.from_user.id
     await send_current_question(update, context, user_id, message_to_edit=query.message)
+
+
+async def show_saved_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows the user's saved quiz library as an inline menu."""
+    # Works from both message and callback query
+    if update.callback_query:
+        user = update.callback_query.from_user
+        send_fn = update.callback_query.message.reply_text
+        await update.callback_query.answer()
+    else:
+        user = update.effective_user
+        send_fn = update.message.reply_text
+
+    saved = db.get_saved_quizzes(user.id)
+
+    if not saved:
+        await send_fn(
+            "📂 <b>My Saved Quizzes</b>\n"
+            "────────────────────────\n"
+            "You haven't saved any quizzes yet.\n\n"
+            "Upload a CSV file and it will appear here for future practice!",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
+
+    buttons = []
+    for q in saved:
+        # Row: [Select button]  [🗑 Delete button]
+        buttons.append([
+            InlineKeyboardButton(
+                f"▶️ {q['quiz_name']}  ({q['question_count']} Qs)",
+                callback_data=f"sel_quiz_{q['id']}"
+            ),
+            InlineKeyboardButton(
+                "🗑",
+                callback_data=f"del_quiz_{q['id']}"
+            )
+        ])
+
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await send_fn(
+        "📂 <b>My Saved Quizzes</b>\n"
+        "────────────────────────\n"
+        "Tap ▶️ to start a quiz, or 🗑 to delete it.",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+
+async def handle_select_saved_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Loads a saved quiz and starts it."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    quiz_id = int(query.data.replace("sel_quiz_", ""))
+
+    result = db.get_saved_quiz_by_id(quiz_id, user_id)
+    if not result:
+        await query.edit_message_text("❌ Quiz not found. It may have been deleted.")
+        return
+
+    questions_list = result["questions"]
+    quiz_name = result["quiz_name"]
+
+    db.start_quiz(user_id, questions_list)
+
+    await query.edit_message_text(
+        f"✅ <b>Starting quiz: {html.escape(quiz_name)}</b>\n"
+        f"Found <b>{len(questions_list)}</b> questions. Let's go!",
+        parse_mode="HTML"
+    )
+    await send_current_question(update, context, user_id)
+
+
+async def handle_delete_saved_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Deletes a saved quiz and refreshes the library view."""
+    query = update.callback_query
+    await query.answer("Deleted ✅")
+
+    user_id = query.from_user.id
+    quiz_id = int(query.data.replace("del_quiz_", ""))
+
+    db.delete_saved_quiz(quiz_id, user_id)
+
+    # Refresh the library list in-place
+    saved = db.get_saved_quizzes(user_id)
+    if not saved:
+        await query.edit_message_text(
+            "📂 <b>My Saved Quizzes</b>\n"
+            "────────────────────────\n"
+            "All quizzes deleted. Upload a new CSV to add more!",
+            parse_mode="HTML"
+        )
+        return
+
+    buttons = []
+    for q in saved:
+        buttons.append([
+            InlineKeyboardButton(
+                f"▶️ {q['quiz_name']}  ({q['question_count']} Qs)",
+                callback_data=f"sel_quiz_{q['id']}"
+            ),
+            InlineKeyboardButton(
+                "🗑",
+                callback_data=f"del_quiz_{q['id']}"
+            )
+        ])
+
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
 
 async def finish_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, session, message_to_edit=None):
     """Saves quiz results to history and renders a premium performance summary report."""
@@ -433,6 +569,8 @@ async def handle_text_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "🚀 Start New Quiz":
         await start_quiz_instructions(update, context)
+    elif text == "📂 My Quizzes":
+        await show_saved_quizzes(update, context)
     elif text == "📊 My Stats":
         await stats_command(update, context)
     elif text == "ℹ️ Help":
@@ -485,6 +623,9 @@ def main():
         tg_app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
         tg_app.add_handler(CallbackQueryHandler(handle_answer_callback, pattern="^quiz_ans_"))
         tg_app.add_handler(CallbackQueryHandler(handle_next_callback, pattern="^quiz_next$"))
+        tg_app.add_handler(CallbackQueryHandler(handle_select_saved_quiz, pattern="^sel_quiz_"))
+        tg_app.add_handler(CallbackQueryHandler(handle_delete_saved_quiz, pattern="^del_quiz_"))
+        tg_app.add_handler(CallbackQueryHandler(lambda u, c: show_saved_quizzes(u, c), pattern="^quiz_library$"))
         tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_menu))
 
         print("Bot starting up...")

@@ -41,6 +41,19 @@ def init_db():
         )
     """)
     
+    # Create saved_quizzes table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS saved_quizzes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            quiz_name TEXT,
+            questions_json TEXT,
+            question_count INTEGER,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -142,3 +155,71 @@ def get_user_stats(user_id):
         "average_score_pct": round(row[1], 1) if row[1] is not None else 0.0,
         "high_score": row[2] if row[2] is not None else 0
     }
+
+# ── Saved Quiz File Functions ────────────────────────────────────────────────
+
+def save_quiz_file(user_id, quiz_name, questions_list):
+    """Saves or replaces a quiz file for a user (keyed by quiz_name)."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    questions_json = json.dumps(questions_list)
+    question_count = len(questions_list)
+    # If a quiz with the same name already exists for this user, replace it
+    cursor.execute("""
+        SELECT id FROM saved_quizzes WHERE user_id = ? AND quiz_name = ?
+    """, (user_id, quiz_name))
+    existing = cursor.fetchone()
+    if existing:
+        cursor.execute("""
+            UPDATE saved_quizzes
+            SET questions_json = ?, question_count = ?, uploaded_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (questions_json, question_count, existing[0]))
+    else:
+        cursor.execute("""
+            INSERT INTO saved_quizzes (user_id, quiz_name, questions_json, question_count)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, quiz_name, questions_json, question_count))
+    conn.commit()
+    conn.close()
+
+def get_saved_quizzes(user_id):
+    """Returns list of saved quizzes for a user (id, quiz_name, question_count, uploaded_at)."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, quiz_name, question_count, uploaded_at
+        FROM saved_quizzes
+        WHERE user_id = ?
+        ORDER BY uploaded_at DESC
+    """, (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "quiz_name": r[1], "question_count": r[2], "uploaded_at": r[3]}
+        for r in rows
+    ]
+
+def get_saved_quiz_by_id(quiz_id, user_id):
+    """Returns the questions list for a saved quiz, or None if not found."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT questions_json, quiz_name FROM saved_quizzes
+        WHERE id = ? AND user_id = ?
+    """, (quiz_id, user_id))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"questions": json.loads(row[0]), "quiz_name": row[1]}
+
+def delete_saved_quiz(quiz_id, user_id):
+    """Deletes a saved quiz for a user."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        DELETE FROM saved_quizzes WHERE id = ? AND user_id = ?
+    """, (quiz_id, user_id))
+    conn.commit()
+    conn.close()
